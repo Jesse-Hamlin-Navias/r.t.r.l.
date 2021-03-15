@@ -4,7 +4,7 @@
 -- script: lua
 version="alpha 0.73"
 
-p,spawn,enemies,max,bar,bar2,turns,glyphs,selector,knife,mode=nil
+p,spawn,enemies,max,bar,bar2,turns,selector,knife,mode=nil
 
 state='menu'
 renderbol = true
@@ -12,7 +12,6 @@ renderbol = true
 function reset_game()
 			p={x=0,y=0}
 			spawn={x=0,y=0}
-			glyphs={}
 			--u,d,l,r is directional state. 0 is no flag, 1 is flag
 			enemies={{x=0,y=0,s={0,0,0,0},x2=0,y2=0,h=3}}
 			--enemies={{x=80,y=40,s={0,0,0,0},x2=0,y2=0}}
@@ -79,13 +78,6 @@ function generate()
 			mset(x,y+1,23) mset(x+1,y+1,24)
 			spawn.x=x*8
 			spawn.y=y*8
-			---set up glyphs
-			for x,v in pairs(glyphs) do
-			   glyphs[x]=nil
-			--   for y=1,13 do
-			--			   glyphs[x][y]='none'
-			--			end
-			end
 end
 
 function rebar()
@@ -212,12 +204,7 @@ function enemy_move(e)
 end
 
 function enemy_death(e)
-			if glyphs[(enemies[e].x)/8]~=nil and
-			   glyphs[(enemies[e].x)/8][(enemies[e].y)/8]~=nil and
-			   (glyphs[(enemies[e].x)/8][(enemies[e].y)/8]=='fire1' or
-			   glyphs[(enemies[e].x)/8][(enemies[e].y)/8]=='fire2') then
-			   enemies[e].h=enemies[e].h-1
-			elseif knife.x==enemies[e].x and knife.y==enemies[e].y then
+			if knife.x==enemies[e].x and knife.y==enemies[e].y then
 			   enemies[e].h=enemies[e].h-1
 			end
 			if enemies[e].h<1 then
@@ -229,48 +216,6 @@ function spawn_enemy(n)
    table.insert(enemies,n+1,{x=0,y=0,s={0,0,0,0},x2=0,y2=0,h=3})
 			enemies[n+1].x=spawn.x
 			enemies[n+1].y=spawn.y
-end
-
-function spread_fire()
- for x,v in pairs(glyphs) do 
-	   for y in pairs(v) do
-							if glyphs[x][y]=='fire2' then
-										glyphs[x][y]=nil
-							end
-				end
- end
-	for x,v in pairs(glyphs) do 
-	   for y in pairs(v) do
-							if glyphs[x][y]=='fire1' then
-										if glyphs[x][y+2]~=nil and
-										    glyphs[x][y+2]=='glyph' then
-										   glyphs[x][y+2]='fire3'  
-										end
-										if glyphs[x][y-2]~=nil and
-										   glyphs[x][y-2]=='glyph' then
-										   glyphs[x][y-2]='fire3'  
-										end
-										if glyphs[x+2]~=nil and
-										   glyphs[x+2][y]~=nil and
-										   glyphs[x+2][y]=='glyph' then
-										   glyphs[x+2][y]='fire3' 
-										end
-										if glyphs[x-2]~=nil and
-										   glyphs[x-2][y]~=nil and
-										   glyphs[x-2][y]=='glyph' then
-										   glyphs[x-2][y]='fire3' 
-										end
-										glyphs[x][y]='fire2'
-							end
-				end
-	end
-	for x,v in pairs(glyphs) do 
-	   for y in pairs(v) do
-							if glyphs[x][y]=='fire3' then
-										glyphs[x][y]='fire1'
-							end
-				end
- end
 end
 
 function knife_move()
@@ -301,7 +246,6 @@ function move()
 				--           function(e1,e2)
 				--											   return math.sqrt((e1.x-p.x)^2+(e1.y-p.y)^2)
 				--														<=math.sqrt((e2.x-p.x)^2+(e2.y-p.y)^2) end)
-		  spread_fire()
 				if turns%2==0 then
 				   for k, v in pairs(enemies) do
 							   enemy_move(k)
@@ -358,26 +302,6 @@ function move()
 					mode='move'
 		end
 	elseif mode=='move' then
-		if btnp(4) then
-		   if glyphs[p.x/8]==nil then
-					   glyphs[p.x/8]={}
-					end
-					if glyphs[p.x/8][p.y/8]==nil then
-					   glyphs[p.x/8][p.y/8]='glyph'
-								inc()
-					end
-		end
-		if btnp(5) then
-		   for x,v in pairs(glyphs) do
-					   for y in pairs(v) do
-								   if x*8==p.x and y*8==p.y and glyphs[x][y]=='glyph' then
-														inc()
-											   glyphs[x][y]='fire1'
-														break
-											end
-								end
-					end
-		end
 		if btnp(6) and knife.d=='hold' then
 		   mode='knife'
 					inc()
@@ -444,28 +368,6 @@ function render_enemies()
 			end
 end
 
-function render_glyphs()
-   for x,v in pairs(glyphs) do 
-			   for y in pairs(v) do
-						   if glyphs[x][y]=='glyph' then
-			         spr(67,x*8,y*8,0,1,0,0,2,2)
-									end
-						end
-			end
-end
-
-function render_effects()
-   for x,v in pairs(glyphs) do 
-			   for y in pairs(v) do
-						   if glyphs[x][y]=='fire1' then
-			         spr(97,x*8+4,y*8+4,0,1,0,0)
-									elseif glyphs[x][y]=='fire2' then
-									   spr(65,x*8,y*8,0,1,1,0,2,2)
-									end
-						end
-			end
-end
-
 function render_bar()
 		 if (time()/1000)%0.25 and bar>0 and bar2<=0 then
 			   bar=bar-2
@@ -525,15 +427,11 @@ function play()
    if bar<1 then state='death' end
 			map(0,0,30,17,0,0)
 			move()
-			render_glyphs()
 			render_p()
 			render_enemies()
-			render_effects()
 			render_bar()
 			render_knife()
 			print("Turns: "..turns,170,0,12)
-		 --print(enemies[1].s[1]..enemies[1].s[2]
-			 --    ..enemies[1].s[3]..enemies[1].s[4],100,0,12)
 end
 
 function death()
@@ -573,18 +471,10 @@ function controls()
 			if btnp(4) then selector=1 state='menu' end
 end
 
---deathsound = false
 reset_game()
 function TIC()
 		
 	cls(0)
-	--if bar<=(max*0.40//1) and bar>=(max//5) then
-	--   if not deathsound then
-	--			   sfx(1, 'E-5', 7, 0,4)
-	--						deathsound=true
-	--			end
-	--else deathsound=false
-	--end
 	if state=='menu' then
 		  menu()
 	elseif state=='play' then
