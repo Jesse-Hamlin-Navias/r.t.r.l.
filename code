@@ -2,10 +2,22 @@
 -- author: Jesse Hamlin-Navias
 -- desc:   A real time rogue like
 -- script: lua
-version="alpha 0.78"
+version="alpha 1.00"
 
-p,spawn,enemies,max,bar,bar2,turns,
-spawn_rate,selector,till_spawn,knife,mode=nil
+p,spawn,enemies,max,bar,bar2,turns,combo,camera,
+spawn_rate,selector,till_spawn,knife,mode,progress=nil
+
+open4= {3194880, 780674560, 114312064, 68947744, 
+3540012080, 3539995824, 35803170209, 3676326320, 
+441001344, 520359840, 153235328, 373884800}
+open3= {1648402495, 13369395, 169912490, 572547181,
+ 206307870, 2163474479, 13089376383, 13358385279,
+	 13396084863, 274466855, 3626011279, 34400145963}
+open2_adjacent= {3376416883, 1499729984, 1232408831,
+ 1231310908, 1426919996, 220565625, 25971463807}
+open2_across= {35987130465, 36230799201, 36230798945,
+ 36222279521, 36064123489, 13515545185, 10226800740}
+open1= {4297201779, 36064106623, 36264358111, 35996715135}
 
 WALL=3
 PLAYER=257
@@ -15,15 +27,17 @@ renderbol = true
 
 
 function reset_game()
-			p={x=0,y=0}
+   camera={}
+			camera.x=0 camera.y=0
+			p={x=0,y=0,d=1}
 			spawn={x=0,y=0}
 			--u,d,l,r is directional state. 0 is no flag, 1 is flag
 			enemies={}
-			enemies[1]={x=0,y=0,s={0,0,0,0},x2=0,y2=0,h=2}
 			--enemies={{x=80,y=40,s={0,0,0,0},x2=0,y2=0}}
-			max=200
+			max=300
 			bar=max
 			bar2=0
+			combo=0
 			turns=0
 			selector=1
 			mode='move'
@@ -31,50 +45,37 @@ function reset_game()
 			generate()
 			spawnrate=32
 			till_spawn=32
+			progress=0
 end
 
 function generate()
    --2,3 to 26,13
-			---clears map
-			for i=2,27,2 do
-			   for j=3,14,2 do
-						   mset(i,j,33)   mset(i+1,j,34)
-									mset(i,j+1,49) mset(i+1,j+1,50)
-						end
-			end
-			---generates walls
-			for i=1,14 do
-			   x=(math.random(1,13))*2
-			   y=(math.random(1,6))*2+1
-						if mget(x,y)~=WALL then
-						   mset(x,y,WALL)    mset(x+1,y,WALL+1)
-									mset(x,y+1,WALL+16) mset(x+1,y+1,WALL+17)
-						end
-			end
-			---generates enemies
-			for e,v in pairs(enemies) do
-			   v.x=0
-						v.y=0
-			end
-			for e,v in pairs(enemies) do
-			   x=(math.random(1,13))*2
-			   y=(math.random(1,6))*2+1
-						while mget(x,y)==WALL or not spr_collide(e,x*8,y*8) do
-						   x=(math.random(1,13))*2
-			      y=(math.random(1,6))*2+1
-						end
-						v.x=x*8
-						v.y=y*8
-			end
+			---generates map
+			generate_map()
+			--generate camera
+			--camera.x=(math.random(40,80))*2
+   --camera.y=(math.random(23,45))*2
+			camera.x=108
+   camera.y=64
 			---generate player
-   x=(math.random(1,13))*2
-   y=(math.random(1,6))*2+1
-			while mget(x,y)==WALL or not spr_collide(p,x*8,y*8) do
-			   x=(math.random(1,13))*2
-      y=(math.random(1,6))*2+1
+   x=(math.random(3,11))*2
+   y=(math.random(2,5))*2+1
+			while mget(x+camera.x,y+camera.y)==WALL or
+			      not spr_collide(p,x*8,y*8) do
+			   x=(math.random(3,11))*2
+      y=(math.random(3,5))*2+1
 			end
 			p.x=x*8
 			p.y=y*8
+			p.d=1
+			--generate enemies
+			for i=1,8 do
+			   for j=1,8 do
+			      enemies[(i-1)*8+j]={x=(i-5)*240+112,
+			 		      y=(j-5)*128+72,s={0,0,0,0},
+												x2=(i-5)*240+112,y2=(j-5)*128+72,h=1}
+						end
+			end
 			--generate spawn
 	  x=(math.random(1,13))*2
 			y=(math.random(1,6))*2+1
@@ -86,18 +87,268 @@ function generate()
 			spawn.y=y*8
 end
 
-function rebar()
-			if bar2>-9 or bar<(max//20) then
-			   bar=bar+(max//(10/3))
-			else
-			   bar=bar+(max//5)
-			end
-			if bar>max then bar=max end
-			bar2=6
+function generate_map()
+   --- create the matrix
+	g = {}
+  for i=0,19 do
+    g[i] = {}  -- create a new column
+    for j=0,10 do
+      g[i][j] = {block=nil,parent=nil}
+      --block have  block ID, and parent indecies
+    end
+  end
+		
+	start = {x=math.random(0,19),y=math.random(0,10)}
+	  --The starting block's parent remains nil
+
+  function fill_block(current)
+    ---table of adjacent blocks and their emptiness
+    test = current.x
+    adj = {}
+    adj2 = {}
+    any_open = 0
+---adj is {down, right, up, left}
+    for i=1,-1,-2 do
+      if g[current.x]==nil or
+        g[current.x][current.y+i]==nil or
+        g[current.x][current.y+i].block~=nil then
+        table.insert(adj,false)
+        table.insert(adj2,false)
+      else
+        table.insert(adj,true)
+        table.insert(adj2,true)
+        any_open = any_open+1
+      end
+      if g[current.x-i]==nil or
+        g[current.x-i][current.y]==nil or
+        g[current.x-i][current.y].block~=nil then
+        table.insert(adj,false)
+        table.insert(adj2,false)
+      else
+        table.insert(adj,true)
+        table.insert(adj2,true)
+        any_open = any_open+1
+      end
+    end
+
+    if g[current.x][current.y].parent~=nil then
+      if current.y>g[current.x][current.y].parent.y then
+        adj2[3]=true
+      elseif current.x<g[current.x][current.y].parent.x then
+        adj2[4]=true
+      elseif current.y<g[current.x][current.y].parent.y then
+        adj2[1]=true
+      elseif current.x>g[current.x][current.y].parent.x then
+        adj2[2]=true
+      end
+    end
+
+    ---Regression if no open adjacent
+    if any_open==0 then
+      if g[current.x][current.y].parent~=nil then
+        if g[current.x][current.y].block==nil then
+          g[current.x][current.y].block=block_end(adj2)
+        end
+        fill_block(g[current.x][current.y].parent)
+      else
+        fill_map(g)
+      end
+    ---Filling current and moving to adjacent
+    else
+      if g[current.x][current.y].block==nil then
+        g[current.x][current.y].block=block_match(adj2,any_open+1)
+      end
+
+      local rand = math.random(4)
+      while not adj[rand] do rand = math.random(4) end
+
+      local child = {x=current.x,y=current.y}
+      if rand==1 then child.y=child.y+1
+      elseif rand==2 then child.x=child.x-1
+      elseif rand==3 then child.y=child.y-1
+      else child.x=child.x+1 end
+
+      g[child.x][child.y].parent = current
+      fill_block(child)
+    end
+  end
+
+  fill_block(start)
 end
 
-function dget(x,y)
- return mget(x/8,y/8)
+function block_match(adj,any_open)
+   block=0
+   if any_open>3 then
+			   block = open4[math.random(12)]
+						--block=55314483315
+						if math.random()>0.5 then
+						   block = flip(block)
+						end
+						i = math.random(0,3)
+						while i>0 do
+						   block = rotate(block)
+									i = i - 1
+						end
+			elseif any_open==3 then
+			   block = open3[math.random(12)]
+						--block=55314483327
+						if math.random()>0.5 then
+						   block = flip(block)
+						end
+						i=1
+						while i<=4 do
+									if not adj[i] then
+									   if i>2 then i=i-3 else i=i+1 end
+									   while i>0 do 
+												   block = rotate(block)
+															i = i - 1
+												end
+												break
+									end
+									i=i+1
+						end
+			elseif any_open==2 then
+			   if adj[1] == adj[3] then
+						   block = open2_across[math.random(7)]
+									--block=55323269235
+									if math.random()>0.5 then
+						      block = flip(block)
+					   	end
+									if math.random()>0.5 then
+						      block = rotate(rotate(block))
+					   	end
+									if adj[2] then
+									   block = rotate(block)
+									end
+					else
+									block = open2_adjacent[math.random(7)]
+									--block=55314749567
+						   if math.random()>0.5 then
+						      block = flip(block)
+												block = rotate(block)
+					   	end
+									if adj[2] and adj[3] then
+									   block = rotate(block)
+									elseif adj[3] and adj[4] then
+									   block = rotate(rotate(block))
+									elseif adj[4] and adj[1] then
+									   block = rotate(rotate(rotate(block)))
+									end
+					end
+			end
+			return block
+end
+
+function block_end(adj)
+  block = open1[math.random(4)]
+		--block=55323269247
+  if math.random()>0.5 then
+      block = flip(block)
+  end
+  i = 1
+  while i<=4 do
+    if adj[i] then
+        while i>1 do 
+              block = rotate(block)
+                i = i - 1
+          end
+          break
+    end
+    i=i+	1
+  end
+  return block
+end
+
+function rotate(x)
+	total = 0
+	for a = 0, 35 do
+		power = 2^a
+    binary = (x-(x%power))%(power*2)
+    if binary ~= 0 then
+		  total = total + 2^(((6-1-(a%6))*6)+(a//6))
+    end
+	end
+  return total
+end
+
+function flip(x)
+	total = 0
+	for a = 0, 35 do
+		power = 2^a
+    binary = (x-(x%power))%(power*2)
+    if binary ~= 0 then
+		  total = total + 2^((6-1-(a%6))+((a//6)*6))
+    end
+	end
+  return total
+end
+
+function fill_map(g)
+   for i=0,19 do
+			   for j=0,10 do
+						   id = g[i][j].block
+									
+						   for x=5,0,-1 do
+									   for y=0,5 do
+												
+																  local power = 2^((5-x)+y*6)
+																  local binary = (id-(id%power))%(power*2)
+																		x2=i*12+x*2+2
+																		y2=j*12+y*2+3
+																  if binary ~= 0 then
+																     mset(x2,y2,3)
+																					mset(x2+1,y2,4)
+																					if j==10 and y==5 then
+																					   mset(x2,y2+1,51)
+																					   mset(x2+1,y2+1,52)
+																					else
+																					   mset(x2,y2+1,math.random(19,22))
+																					   mset(x2+1,y2+1,math.random(23,26))
+																					end
+																					if mget(x2,y2-1)>=19 and
+																					   mget(x2,y2-1)<=22 then
+																					   mset(x2,y2-1,51)
+																					   mset(x2+1,y2-1,52)
+																					end
+																		elseif (i==3 or i==16) and
+																		       (j==1 or j==7) and
+																									x>0 and x<5 and
+																									y>0 and y<5 then
+																									--progress[1]==nil then
+																		   mset(x2,y2,65)
+																					mset(x2+1,y2,66)
+																					mset(x2,y2+1,81)
+																					mset(x2+1,y2+1,82)
+																		elseif (i==9 or i==10) and
+																		       (j==5 or j==6) then
+																									mset(x2,y2,97)
+																					    mset(x2+1,y2,98)
+																					    mset(x2,y2+1,113)
+																					    mset(x2+1,y2+1,114)
+																		else
+																		   mset(x2,y2,33)
+																					mset(x2+1,y2,34)
+																					mset(x2,y2+1,49)
+																					mset(x2+1,y2+1,50)
+																		end
+												
+												end
+									end
+						
+						end
+			end
+end
+
+function rebar()
+   combo=combo+1
+			--if bar2>-9 or bar<(max//20) then
+			--   bar=bar+(max//(10/3))
+			--else
+			--   bar=bar+(max//5)
+			--end
+			bar=bar+((max//20)*combo)+5
+			if bar>max then bar=max combo=0 end
+			bar2=10
 end
 
 function spr_collide(e,x,y)
@@ -239,49 +490,50 @@ function spawn_enemy()
 			   local n=#enemies
 			   table.insert(enemies,n+1,{x=0,y=0,s={0,0,0,0},x2=0,y2=0,h=2})
 						enemies[n+1].x=spawn.x
-						enemies[n+1].y=spawn.y
 						enemies[n+1].x2=spawn.x
+						enemies[n+1].y=spawn.y
 						enemies[n+1].y2=spawn.y
 						enemy_plan(n+1)
-						if spawnrate>15 then
-						   spawnrate=spawnrate-1
-						end
-						till_spawn=spawnrate
-						local x=(math.random(1,13))*2
-						local y=(math.random(1,6))*2+1
-						while mget(x,y)==WALL do
-						   x=(math.random(1,13))*2
-									y=(math.random(1,6))*2+1
-						end
-						spawn.x=x*8
-						spawn.y=y*8
+						difficulty()
 			end
 end
 
+function difficulty()
+			if (progress>1 and spawnrate>15) or
+			   (progress>2 and spawnrate>5) then
+					 spawnrate=spawnrate-1
+			end
+			till_spawn=spawnrate
+			local x=(math.random(1,13))
+			local y=(math.random(1,6))
+			while mget(x*2+camera.x,y*2+camera.y)==WALL do
+			   x=(math.random(1,13))
+						y=(math.random(1,6))
+			end
+			spawn.x=x*16
+			spawn.y=y*16+8
+end
+
 function knife_move()
+   local function hit(x2,y2)
+			   if dget(knife.x+x2,knife.y+y2)==WALL then
+						   knife.d='hit'
+						else knife.x=knife.x+x2
+						     knife.y=knife.y+y2 end
+			end
 			if knife.d=='up' then
-			   if dget(knife.x,knife.y-16)==WALL then
-						   knife.d='hit'
-						else knife.y=knife.y-16 end
+			   hit(0,-16)
 			elseif knife.d=='down' then
-			   if dget(knife.x,knife.y+16)==WALL then
-						   knife.d='hit'
-						else knife.y=knife.y+16 end
+			   hit(0,16)
 			elseif knife.d=='left' then
-			   if dget(knife.x-16,knife.y)==WALL then
-						   knife.d='hit'
-						else knife.x=knife.x-16 end
+			   hit(-16,0)
 			elseif knife.d=='right' then
-			   if dget(knife.x+16,knife.y)==WALL then
-						   knife.d='hit'
-						else knife.x=knife.x+16 end
+			   hit(16,0)
 			elseif knife.d=='hit' then
 			   knife.t=knife.t+1
 						if knife.t>8 then
 			      knife.d='hold'
-						   knife.x=0
-						   knife.y=0
-									knife.t=0
+						   knife.x,knife.y,knife.t=0
 						end
 			end
 end
@@ -289,10 +541,14 @@ end
 function move()
  local function inc()
 				turns=turns+1
-				till_spawn=till_spawn-1
 				if not spr_collide(p,p.x,p.y) then
 			   state='death'
 			 end
+				if dget(p.x,p.y)==65 then
+							clear()
+				elseif dget(p.x,p.y)==97 and progress==4 then
+				   state='win'
+				end
 				knife_move()
 				for k, v in pairs(enemies) do
 										enemy_death(k)
@@ -300,7 +556,7 @@ function move()
 				for k,v in ipairs(enemies) do
 				   if k==nil then table.remove(enemies, k) end
 				end
-   --math.sqrt((enemies[e].x-p.x)^2+(enemies[e].y-p.y)^2)
+    --math.sqrt((enemies[e].x-p.x)^2+(enemies[e].y-p.y)^2)
 				table.sort(enemies,
 				           function(e1,e2)
 															   return math.sqrt((e1.x-p.x)^2+(e1.y-p.y)^2)
@@ -315,7 +571,10 @@ function move()
 							   enemy_plan(k)
 							end
 				end
-				spawn_enemy()
+				if progress>0 then 
+				   till_spawn=till_spawn-1
+							spawn_enemy()
+				end
 				if p.x==knife.x and p.y==knife.y then
 				   knife.d='hold'
 							knife.x=0
@@ -327,129 +586,197 @@ function move()
 			 end
 				rebar()
 				renderbol = true
+				camera_move()
 				sfx(0, 'E-5', 10, 0, math.random(1,7))
 	end
 	
+	local function throw(dir)
+	   knife.y=p.y
+				knife.x=p.x
+				knife.d=dir
+				knife.t=0
+				inc()
+				mode='move'
+	end
+	
 	if mode=='knife' then
-	 if btnp(0) and mget(p.x/8,(p.y-16)/8)~=WALL then
-		   knife.y=p.y
-					knife.x=p.x
-					knife.d='up'
-					inc()
-					mode='move'
+	 if btnp(0) and dget(p.x,(p.y-16))~=WALL then
+		   throw('up')--haha
 		end
-		if btnp(1) and mget(p.x/8,(p.y+16)/8)~=WALL then
-					knife.y=p.y
-					knife.x=p.x
-					knife.d='down'
-					inc()
-					mode='move'
+		if btnp(1) and dget(p.x,(p.y+16))~=WALL then
+					throw('down')
 		end
-		if btnp(2) and mget((p.x-16)/8,p.y/8)~=WALL then  
-					knife.y=p.y
-					knife.x=p.x
-					knife.d='left'
-					inc()
-					mode='move'
+		if btnp(2) and dget((p.x-16),p.y)~=WALL then  
+					throw('left')
 		end
-		if btnp(3) and mget((p.x+16)/8,p.y/8)~=WALL then 
-					knife.y=p.y
-					knife.x=p.x
-					knife.d='right'
-					inc()
-					mode='move'
+		if btnp(3) and dget((p.x+16),p.y)~=WALL then 
+					throw('right')
 		end
 	elseif mode=='move' then
-		if btnp(6) and knife.d=='hold' then
+		if btnp(6) and knife.d=='hold' and progress>0 then
 		   mode='knife'
 					inc()
 		end
-		if btnp(0) and mget(p.x/8,(p.y-16)/8)~=WALL then
+		if btnp(0) and dget(p.x,(p.y-16))~=WALL then
 		   p.y=p.y-16
 					inc()
 		end
-		if btnp(1) and mget(p.x/8,(p.y+16)/8)~=WALL then
+		if btnp(1) and dget(p.x,(p.y+16))~=WALL then
 					p.y=p.y+16
 					inc()
 		end
-		if btnp(2) and mget((p.x-16)/8,p.y/8)~=WALL then
+		if btnp(2) and dget((p.x-16),p.y)~=WALL then
 					p.x=p.x-16
+					p.d=1
 					inc()
 		end
-		if btnp(3) and mget((p.x+16)/8,p.y/8)~=WALL then
+		if btnp(3) and dget((p.x+16),p.y)~=WALL
+		   and p.x<208 then
 					p.x=p.x+16
+					p.d=0
 					inc()
 		end
  end
 end
 
+function dget(x,y)
+   return mget(x/8+camera.x,y/8+camera.y)
+end
+
+function clear()
+   progress=progress+1
+			max=max-100
+			if max==0 then max=50 end
+   for i=-8,8,2 do
+			   for j=-8,8,2 do
+						   if dget(p.x+i*8,p.y+j*8)==65 then
+									   mset(p.x/8+i+camera.x,p.y/8+j+camera.y,33)
+												mset(p.x/8+i+camera.x+1,p.y/8+j+camera.y,34)
+												mset(p.x/8+i+camera.x,p.y/8+j+camera.y+1,49)
+												mset(p.x/8+i+camera.x+1,p.y/8+j+camera.y+1,50)
+									end
+						end
+			end
+end
+
+function camera_move()
+   local function shift_spr(x,y)
+			   camera.x = camera.x - (x/8)
+						camera.y = camera.y - (y/8)
+			   p.x = p.x + x      p.y = p.y + y
+						spawn.x=spawn.x+x  spawn.y=spawn.y+y
+						
+						if knife.d~='hold' then
+						   knife.x = knife.x + x  knife.y = knife.y + y
+						end
+						
+						for e,v in pairs(enemies) do
+						   v.x = v.x + x    v.y = v.y + y
+									v.x2 = v.x2 + x  v.y2 = v.y2 + y
+						end
+			end
+			
+   if p.x < 40 and camera.x > 0 then 
+						shift_spr(16,0)
+			elseif p.x > 184 and camera.x < 212 then
+						shift_spr(-16,0)
+			elseif p.y < 32 and camera.y > 0  then
+						shift_spr(0,16)
+			elseif p.y > 96 and camera.y < 120 then
+						shift_spr(0,-16)
+			end
+end
+
 function render_p()
    if turns%2==0 then
-			   spr(PLAYER,p.x,p.y,7,1,0,0,2,2)
+			   spr(PLAYER,p.x,p.y,7,1,p.d,0,2,2)
 			else
-			   spr(PLAYER+2,p.x,p.y,7,1,0,0,2,2)
+			   spr(PLAYER+2,p.x,p.y,7,1,p.d,0,2,2)
 			end
 end
 
 function render_enemies()
 			for e, v in pairs(enemies) do
-      if v.h==2 then
-						   spr(71,v.x,v.y,7,1,0,0,2,2)
-						elseif v.h==1 then
-						   spr(41,v.x+4,v.y,7,1,0,0,1,2)
-						end
-						if v.y2<v.y then
-						   spr(37,v.x+5,v.y-4,0,1,0,3)
-						elseif v.y2>v.y then
-						   spr(37,v.x+3,v.y+12,0,1,0,1)
-						elseif v.x2>v.x then
-						   spr(37,v.x+12,v.y+5,0,1,0)
-						elseif v.x2<v.x then
-						   spr(37,v.x-5,v.y+2,0,1,0,2)
+			   if v.x<250 and v.x>-10 and v.y<370 and v.y>0 then
+			      if v.h==2 then
+									   spr(71,v.x,v.y,7,1,0,0,2,2)
+									elseif v.h==1 then
+									   spr(41,v.x+4,v.y,7,1,0,0,1,2)
+									end
+									if v.y2<v.y then
+									   spr(37,v.x+5,v.y-4,0,1,0,3)
+									elseif v.y2>v.y then
+									   spr(37,v.x+3,v.y+12,0,1,0,1)
+									elseif v.x2>v.x then
+									   spr(37,v.x+12,v.y+5,0,1,0)
+									elseif v.x2<v.x then
+									   spr(37,v.x-5,v.y+2,0,1,0,2)
+									end
 						end
 			end
-			if till_spawn==4 then
-			   circ(spawn.x+8,spawn.y+8,2,2)
-			elseif till_spawn==3 then
-			   circ(spawn.x+8,spawn.y+8,4,2)
-			elseif till_spawn==2 then
-			   circ(spawn.x+8,spawn.y+8,6,2)
-			elseif till_spawn==1 then
-			   circ(spawn.x+8,spawn.y+8,8,2)
+			--if till_spawn==4 then
+			--   circ(spawn.x+8,spawn.y+8,2,2)
+			--elseif till_spawn==3 then
+			--   circ(spawn.x+8,spawn.y+8,4,2)
+			--elseif till_spawn==2 then
+			--   circ(spawn.x+8,spawn.y+8,6,2)
+			--elseif till_spawn==1 then
+			--   circ(spawn.x+8,spawn.y+8,8,2)
+			--end
+			
+			if till_spawn<5 then
+			   circ(spawn.x+8,spawn.y+8,(5-till_spawn)*2,2)
 			end
 end
 
 function render_bar()
 		 if (time()/1000)%0.25 and bar>0 and bar2<=0 then
-			   bar=bar-2
+			   bar=bar-1
+						combo=0
 			elseif (time()/1000)%0.2 then
 			   bar2=bar2-1
 			end
    -------			
 			if bar>0 then
-			   rect(10,8,(bar/max)*60,8,2)
+			   rect(13,1,(bar/max)*190,6,2)
 			end	
-			spr(6,8,4,0,2,1)
-			spr(5,24,4,0,2)
-			spr(5,40,4,0,2)
-			spr(6,56,4,0,2)
+			spr(6,12,0,0,1,1)
+			for i=0,21 do
+			   spr(5,20+i*8,0,0,1)
+			end
+			spr(6,196,0,0,1)
+end
+
+function render_prog()
+   for i=0,3 do
+						if progress>i then
+						   circ(208+i*8,3,3,4)
+						end
+						circb(208+i*8,3,3,13)
+			end
+			
+			if progress>0 and knife.d=='hold' then
+			   spr(38,2,0)
+			end
 end
 
 function render_knife()
-   if knife.d=='hit' then
-			   spr(38,knife.x+4,knife.y+4,0)
-						circb(knife.x+8,knife.y+8,8,13)
-						circbp(knife.x,knife.y,10,knife.t)
-			elseif mode=='knife' then
-			   spr(53,p.x,p.y+6,0,1,0,0,2,1)
-			elseif knife.d=='up' then
-			   spr(53,knife.x+4,knife.y,0,1,0,3,2,1)
-			elseif knife.d=='down' then
-			   spr(53,knife.x+4,knife.y,0,1,0,1,2,1)
-			elseif knife.d=='left' then
-			   spr(53,knife.x,knife.y+4,0,1,1,0,2,1)
-			elseif knife.d=='right' then
-			   spr(53,knife.x,knife.y+4,0,1,0,0,2,1)
+   if knife.y~=nil and knife.y>0 then
+			   if knife.d=='hit' then
+						   spr(38,knife.x+4,knife.y+4,0)
+									circb(knife.x+8,knife.y+8,8,13)
+									circbp(knife.x,knife.y,2,knife.t)
+						elseif mode=='knife' then
+						   spr(53,p.x,p.y+6,0,1,0,0,2,1)
+						elseif knife.d=='up' then
+						   spr(53,knife.x+4,knife.y,0,1,0,3,2,1)
+						elseif knife.d=='down' then
+						   spr(53,knife.x+4,knife.y,0,1,0,1,2,1)
+						elseif knife.d=='left' then
+						   spr(53,knife.x,knife.y+4,0,1,1,0,2,1)
+						elseif knife.d=='right' then
+						   spr(53,knife.x,knife.y+4,0,1,0,0,2,1)
+						end
 			end
 end
 
@@ -497,11 +824,11 @@ function circbp(x,y,c,p)
 end
 
 function menu()
-   print("R.T.R.L.", 40, 40, 5,false,5)
+   print("R.T.R.L.", 40, 40, 1,false,5)
 			print("real.time.rogue.like.",60,70,14,true,1)
 			print("version "..version,0,130,15,fasle,1,true)
 			if selector==1 then
-			   print("Play",63,85,13,false,2)
+			   print("Play",63,85,10,false,2)
 						print("Z",113,89,15,false,1)
 			   print("Controls",60,100,14,false,1)
 						if btnp(4) then
@@ -510,7 +837,7 @@ function menu()
 						end
 		 elseif selector==2 then
 			   print("Play",60,90,14,false,1)
-			   print("Controls",62,99,13,false,2)
+			   print("Controls",62,99,10,false,2)
 						print("Z",160,102,15,false,1)
 						if btnp(4) then state='controls' end
 		 end
@@ -524,13 +851,16 @@ end
 function play()
    if bar<1 then state='death'
 			else
-						map(0,0,30,17,0,0)
+						map(camera.x,camera.y,30,17,0,0)
+						rect(0,0,240,8,0)
 						move()
 						render_p()
 						render_enemies()
 						render_bar()
+						render_prog()
 						render_knife()
-						print("Turns: "..turns,170,0,12)
+						--print("size: "..#enemies,70,0,12)
+						--print("Turns: "..turns,170,0,12)
 			end
 end
 
@@ -538,7 +868,7 @@ function death()
    print("You Died!",10,50, 2,false,5)
 			print("Turns: "..turns,96,79,12)
 			if selector==1 then
-		   print("Play",63,85,13,false,2)
+		   print("Play",63,85,10,false,2)
 					print("Z",113,89,15,false,1)
 		   print("Menu",60,100,14,false,1)
 					if btnp(4) then
@@ -547,7 +877,7 @@ function death()
 				 end
 	 elseif selector==2 then
 		   print("Play",60,90,14,false,1)
-		   print("Menu",62,99,13,false,2)
+		   print("Menu",62,99,10,false,2)
 					print("Z",115,102,15,false,1)
 					if btnp(4) then selector=1 state='menu' end
 	 end
@@ -559,17 +889,46 @@ function death()
 end
 
 function controls()
-   print("Controls:", 30, 40, 5,false,3)
-			print("Arrow keys to move",30,70,14,true,1)
+   print("How to Play:", 30, 20, 1,false,3)
+			print("Arrow keys to move",30,50,10,true,1)
 			print("Don't let the timer run out."
 			      .."\nDon't touch any enemies."
-									.."\nSurvive for as many\nturns as possible"
+									.."\nCollect the 4 yellow areas"
+									.."\n    around the map"
+									.."\nThen return to the blue"
+									.."\n    center of the map"
+									.."\nCollecting the first area"
+									.."\n    will give you a knife"
 									.."\nA to ready knife"
 									.."\nArrow keys to throw knife"
 									.."\nZ to return to menu",
-			       30,76,14,true,1)
+			       30,56,10,true,1)
 			print("version "..version,0,130,15,fasle,1,true)
 			if btnp(4) then selector=1 state='menu' end
+end
+
+function win()
+   print("You Win!",24,50, 10,false,5)
+			print("Turns: "..turns,96,79,12)
+			if selector==1 then
+		   print("Play Again",63,85,10,false,2)
+					print("Z",178,89,15,false,1)
+		   print("Menu",60,100,14,false,1)
+					if btnp(4) then
+								reset_game()
+								state='play'
+				 end
+	 elseif selector==2 then
+		   print("Play Again",60,90,14,false,1)
+		   print("Menu",62,99,10,false,2)
+					print("Z",115,102,15,false,1)
+					if btnp(4) then selector=1 state='menu' end
+	 end
+		if btnp(0) and selector==2 then
+		   selector=1
+		elseif btnp(1) and selector==1 then
+		   selector=2
+		end	
 end
 
 reset_game()
@@ -584,5 +943,7 @@ function TIC()
     controls()
 	elseif state=='death' then
 	   death()
+	elseif state=='win' then
+	   win()
 	end
 end
